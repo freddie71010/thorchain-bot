@@ -1,18 +1,11 @@
-import os
-import tweepy
-from dotenv import load_dotenv
 import logging
+import os
 import pprint as pp
 
+import tweepy
+from dotenv import load_dotenv
+
 load_dotenv()
-# logging
-logging.basicConfig(level=logging.INFO,
-                    filename="logs/log__twitter_feed_log.txt",
-                    filemode="w")
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-logging.getLogger().addHandler(console)
-logger = logging.getLogger()
 
 
 class THORChainBot:
@@ -54,12 +47,12 @@ class THORChainBot:
             list_name = get_list_response.data.name
             list_id = get_list_response.data.id
         accs: dict = self.client.get_list_members(id=self.THORCHAIN_BOT_LIST_ID)
-        self.THORCHAIN_BOT_LIST_MEMBERS = accs.data
+        members_info: dict = {}
 
-        members_info: list = []
         for acc in accs.data:
-            members_info.append((acc.id, acc.username))
-        logger.info(f"{list_name} ({list_id}):\n{members_info}")
+            members_info[acc.id] = acc.username
+        self.THORCHAIN_BOT_LIST_MEMBERS = members_info
+        logger.info(f"{list_name} ({list_id}) has {len(members_info)} members:\n{members_info}")
         return
 
     def download_and_filter_tweets_from_list(self, results=100):
@@ -99,7 +92,7 @@ class THORChainBot:
         for tweet in list_all_tweets:
             while nottweetable := True:
                 # List out different filter functions - Add additional filters below!
-                self.filter_by_space_urls(tweet)
+                self.filter_by_twitter_space_urls(tweet)
                 if nottweetable:
                     logger.info(f"Skipping tweet ID: {tweet['id']}")
                     break
@@ -110,20 +103,28 @@ class THORChainBot:
         """
         Logs Retweetable Tweet data to the console and to a log file.
         """
-        logger.info(f"Length of RETWEETABLE_TWEETS: {len(self.RETWEETABLE_TWEET_IDS)}{os.linesep}{'-'*50}")
-        for tweet in self.RETWEETABLE_TWEETS.keys():
+        logger.info(f"Length of RETWEETABLE_TWEETS: {len(self.RETWEETABLE_TWEET_IDS)}{os.linesep}")
+        for i, tweet in enumerate(self.RETWEETABLE_TWEETS.keys(), start=1):
             t = self.RETWEETABLE_TWEETS[tweet]
-            logger.info(f"tweet_id: {t.data['id']},{os.linesep}"
-                        f"created_at: {t.created_at},{os.linesep}"
-                        f"expanded_url: {t.entities['urls'][0]['expanded_url']},{os.linesep}"
-                        f"data: {t.data['text']} {os.linesep}"
-                        f"{'-'*50}")
+            logger.info(
+                f"#{i} {'-' * 50}{os.linesep}"
+                f"author_username: {self.THORCHAIN_BOT_LIST_MEMBERS[int(t.data['author_id'])]},{os.linesep}"
+                f"created_at: {t.created_at},{os.linesep}"
+                f"tweet_id: {t.data['id']},{os.linesep}"
+                f"expanded_url: {t.entities['urls'][0]['expanded_url']},{os.linesep}"
+                f"data: {t.data['text']} {os.linesep}"
+            )
 
-        with open("logs/log__retweetable_tweets.txt", "w") as f:
+        # Only export logs if this file ('main.py') is run directly
+        if __name__ == '__main__':
+            with open("../logs/log__retweetable_tweets.txt", "w") as f:
+                for id in self.RETWEETABLE_TWEET_IDS:
+                    pp.pprint(self.RETWEETABLE_TWEETS[id].data, stream=f)
+        else:
             for id in self.RETWEETABLE_TWEET_IDS:
-                pp.pprint(self.RETWEETABLE_TWEETS[id].data, stream=f)
+                logger.info(self.RETWEETABLE_TWEETS[id].data)
 
-    def filter_by_space_urls(self, tweet):
+    def filter_by_twitter_space_urls(self, tweet):
         """
         Filter: identifies tweets that contain a Twitter Space embedded link. If filter identifies a valid tweet,
         add tweet ID to the 'RETWEETABLE_TWEET_IDS' field.
@@ -156,14 +157,38 @@ class THORChainBot:
         return
 
 
+def lambda_handler(event, context):
+    """
+    Function for AWS Lambda to call.
+    :param event: default for AWS
+    :param context:  default for AWS
+    """
+    logging.getLogger().setLevel(logging.INFO)
+    global logger
+    logger = logging.getLogger()
+    run_thorchain_bot()
+
+
 def run_thorchain_bot():
+    """
+    Main function that runs the THORChain Twitter Bot.
+    """
     thorchainbot = THORChainBot()
     thorchainbot.get_accounts_from_list()
-    thorchainbot.download_and_filter_tweets_from_list()
+    thorchainbot.download_and_filter_tweets_from_list(results=100)
     thorchainbot.log_retweetable_tweets_data()
-    thorchainbot.retweet_tweets()
+    # thorchainbot.retweet_tweets()
     print('End')
 
 
 if __name__ == '__main__':
+    # If running 'main.py' file directly: sets up logging accordingly
+    logging.basicConfig(level=logging.INFO,
+                        filename="../logs/log__twitter_feed_log.txt",
+                        filemode="w")
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    logging.getLogger().addHandler(console)
+    logger = logging.getLogger()
+
     run_thorchain_bot()
